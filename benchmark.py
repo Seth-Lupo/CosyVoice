@@ -26,7 +26,8 @@ TEST_PHRASES = [
 ]
 
 # Prompt text and audio for zero-shot cloning
-PROMPT_TEXT = "Hope you can do better than me in the future."
+# NOTE: The prompt text must match the content of the audio file
+PROMPT_TEXT = "希望你以后能够做的比我还好呦。"
 PROMPT_WAV = "./asset/zero_shot_prompt.wav"
 
 
@@ -72,7 +73,7 @@ def run_benchmark(model_dir='pretrained_models/CosyVoice2-0.5B', num_warmup=2):
     # Warmup runs
     print(f"\nRunning {num_warmup} warmup iterations...")
     for i in range(num_warmup):
-        warmup_phrase = "This is a warmup run. Please ignore this output."
+        warmup_phrase = "这是一个预热测试，请忽略此输出。"
         for _ in model.inference_zero_shot(warmup_phrase, PROMPT_TEXT, PROMPT_WAV, stream=True):
             pass
         print(f"  Warmup {i+1}/{num_warmup} complete")
