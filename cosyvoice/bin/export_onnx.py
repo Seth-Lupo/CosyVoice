@@ -27,7 +27,7 @@ from tqdm import tqdm
 ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append('{}/../..'.format(ROOT_DIR))
 sys.path.append('{}/../../third_party/Matcha-TTS'.format(ROOT_DIR))
-from cosyvoice.cli.cosyvoice import AutoModel
+from cosyvoice.cli.cosyvoice import CosyVoice2
 from cosyvoice.utils.file_utils import logging
 
 
@@ -45,7 +45,7 @@ def get_args():
     parser = argparse.ArgumentParser(description='export your model for deployment')
     parser.add_argument('--model_dir',
                         type=str,
-                        default='pretrained_models/CosyVoice-300M',
+                        default='pretrained_models/CosyVoice2-0.5B',
                         help='local path')
     args = parser.parse_args()
     print(args)
@@ -58,7 +58,7 @@ def main():
     logging.basicConfig(level=logging.DEBUG,
                         format='%(asctime)s %(levelname)s %(message)s')
 
-    model = AutoModel(model_dir=args.model_dir)
+    model = CosyVoice2(model_dir=args.model_dir)
 
     # 1. export flow decoder estimator
     estimator = model.model.flow.decoder.estimator

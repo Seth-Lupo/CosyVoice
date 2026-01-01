@@ -74,7 +74,7 @@ class Executor:
 
                 info_dict = update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict)
                 log_per_step(writer, info_dict)
-                # NOTE specify save_per_step in cosyvoice.yaml if you want to enable step save
+                # NOTE specify save_per_step in cosyvoice2.yaml if you want to enable step save
                 if info_dict['save_per_step'] > 0 and (self.step + 1) % info_dict['save_per_step'] == 0 and \
                    (batch_idx + 1) % info_dict["accum_grad"] == 0:
                     dist.barrier()
@@ -132,7 +132,7 @@ class Executor:
                 info_dict = update_parameter_and_lr(model, optimizer, scheduler, scaler, info_dict)
                 optimizer_d.zero_grad()
                 log_per_step(writer, info_dict)
-                # NOTE specify save_per_step in cosyvoice.yaml if you want to enable step save
+                # NOTE specify save_per_step in cosyvoice2.yaml if you want to enable step save
                 if info_dict['save_per_step'] > 0 and (self.step + 1) % info_dict['save_per_step'] == 0 and \
                    (batch_idx + 1) % info_dict["accum_grad"] == 0:
                     dist.barrier()
