@@ -29,7 +29,7 @@ TEST_PHRASES = [
 PROMPT_WAV = "./asset/cross_lingual_prompt.wav"
 
 
-def run_benchmark(model_dir='pretrained_models/CosyVoice2-0.5B', num_warmup=2):
+def run_benchmark(model_dir='pretrained_models/CosyVoice2-0.5B', num_warmup=2, fp16=False):
     """
     Run the full benchmark suite.
     """
@@ -40,8 +40,9 @@ def run_benchmark(model_dir='pretrained_models/CosyVoice2-0.5B', num_warmup=2):
     # Load model
     print(f"\nLoading model from: {model_dir}")
     load_start = time.perf_counter()
-    model = CosyVoice2(model_dir=model_dir)
+    model = CosyVoice2(model_dir=model_dir, fp16=fp16)
     load_time = time.perf_counter() - load_start
+    print(f"Precision: {'FP16' if fp16 else 'FP32'}")
     print(f"Model loaded in {load_time:.2f} seconds")
     print(f"Sample rate: {model.sample_rate} Hz")
 
@@ -132,7 +133,9 @@ if __name__ == '__main__':
                         help='Path to the model directory')
     parser.add_argument('--warmup', type=int, default=2,
                         help='Number of warmup iterations')
+    parser.add_argument('--fp16', action='store_true',
+                        help='Use FP16 precision (requires CUDA)')
 
     args = parser.parse_args()
 
-    results = run_benchmark(model_dir=args.model_dir, num_warmup=args.warmup)
+    results = run_benchmark(model_dir=args.model_dir, num_warmup=args.warmup, fp16=args.fp16)
