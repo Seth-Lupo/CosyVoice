@@ -19,11 +19,15 @@ def load_flow_decoder(model_dir: str, device: str = 'cuda'):
     from cosyvoice.flow.flow import CausalMaskedDiffWithXvec
     from omegaconf import OmegaConf
 
-    # Load config
-    config_path = os.path.join(model_dir, 'cosyvoice.yaml')
+    # Load config (try both naming conventions)
+    config_path = os.path.join(model_dir, 'cosyvoice2.yaml')
+    if not os.path.exists(config_path):
+        config_path = os.path.join(model_dir, 'cosyvoice.yaml')
+
     with open(config_path, 'r') as f:
         import yaml
         configs = yaml.safe_load(f)
+    print(f"Loaded config from {config_path}")
 
     # Get flow config
     flow_config = configs.get('flow', {})
