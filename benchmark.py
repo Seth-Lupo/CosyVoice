@@ -11,7 +11,7 @@ sys.path.append('third_party/Matcha-TTS')
 
 from cosyvoice.cli.cosyvoice import CosyVoice2
 
-# 10 two-sentence test phrases
+# 10 two-sentence test phrases (English)
 TEST_PHRASES = [
     "The sun rose over the mountains. Birds began to sing in the trees.",
     "She opened the door slowly. A cold breeze swept through the hallway.",
@@ -25,33 +25,8 @@ TEST_PHRASES = [
     "Waves crashed against the shore. Seagulls circled overhead in the evening sky.",
 ]
 
-# Prompt text and audio for zero-shot cloning
-# NOTE: The prompt text must match the content of the audio file
-PROMPT_TEXT = "希望你以后能够做的比我还好呦。"
-PROMPT_WAV = "./asset/zero_shot_prompt.wav"
-
-
-def benchmark_ttfa(model, phrase, stream=True):
-    """
-    Measure Time to First Audio (TTFA) for a single phrase.
-    Returns TTFA in milliseconds.
-    """
-    start_time = time.perf_counter()
-
-    for i, output in enumerate(model.inference_zero_shot(
-        phrase,
-        PROMPT_TEXT,
-        PROMPT_WAV,
-        stream=stream
-    )):
-        if i == 0:
-            ttfa = (time.perf_counter() - start_time) * 1000  # Convert to ms
-            # Continue to drain the generator
-            for _ in model.inference_zero_shot(phrase, PROMPT_TEXT, PROMPT_WAV, stream=stream):
-                pass
-            return ttfa, output['tts_speech'].shape[1] / model.sample_rate
-
-    return None, None
+# English prompt audio and matching text
+PROMPT_WAV = "./asset/cross_lingual_prompt.wav"
 
 
 def run_benchmark(model_dir='pretrained_models/CosyVoice2-0.5B', num_warmup=2):
@@ -73,8 +48,8 @@ def run_benchmark(model_dir='pretrained_models/CosyVoice2-0.5B', num_warmup=2):
     # Warmup runs
     print(f"\nRunning {num_warmup} warmup iterations...")
     for i in range(num_warmup):
-        warmup_phrase = "这是一个预热测试，请忽略此输出。"
-        for _ in model.inference_zero_shot(warmup_phrase, PROMPT_TEXT, PROMPT_WAV, stream=True):
+        warmup_phrase = "This is a warmup test. Please ignore this output."
+        for _ in model.inference_cross_lingual(warmup_phrase, PROMPT_WAV, stream=True):
             pass
         print(f"  Warmup {i+1}/{num_warmup} complete")
 
@@ -91,9 +66,8 @@ def run_benchmark(model_dir='pretrained_models/CosyVoice2-0.5B', num_warmup=2):
         total_audio_duration = 0
         chunk_count = 0
 
-        for output in model.inference_zero_shot(
+        for output in model.inference_cross_lingual(
             phrase,
-            PROMPT_TEXT,
             PROMPT_WAV,
             stream=True
         ):
