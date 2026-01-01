@@ -17,16 +17,16 @@ from typing import Generator
 from tqdm import tqdm
 
 # Patch for Python 3.12+ compatibility with ruamel.yaml/hyperpyyaml
-import hyperpyyaml.core
-_original_loader = hyperpyyaml.core.make_yaml_loader
-
-def _patched_make_yaml_loader(*args, **kwargs):
-    loader = _original_loader(*args, **kwargs)
-    if not hasattr(loader, 'max_depth'):
-        loader.max_depth = None
-    return loader
-
-hyperpyyaml.core.make_yaml_loader = _patched_make_yaml_loader
+try:
+    from ruamel.yaml import YAML
+    _original_init = YAML.__init__
+    def _patched_init(self, *args, **kwargs):
+        _original_init(self, *args, **kwargs)
+        if not hasattr(self, 'max_depth'):
+            self.max_depth = None
+    YAML.__init__ = _patched_init
+except Exception:
+    pass
 
 from hyperpyyaml import load_hyperpyyaml
 from modelscope import snapshot_download
