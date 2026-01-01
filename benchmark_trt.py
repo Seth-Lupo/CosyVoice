@@ -1,18 +1,13 @@
 #!/usr/bin/env python3
 """
-CosyVoice2 TensorRT-LLM Benchmark Script
-Measures Time to First Audio (TTFA) with TensorRT acceleration
+CosyVoice2 TensorRT Benchmark Script
+Measures Time to First Audio (TTFA) with TensorRT flow decoder acceleration
 """
 
 import sys
 import time
 import statistics
 sys.path.append('third_party/Matcha-TTS')
-
-# Register vLLM model before imports
-from vllm import ModelRegistry
-from cosyvoice.vllm.cosyvoice2 import CosyVoice2ForCausalLM
-ModelRegistry.register_model("CosyVoice2ForCausalLM", CosyVoice2ForCausalLM)
 
 from cosyvoice.cli.cosyvoice import CosyVoice2
 from cosyvoice.utils.common import set_all_random_seed
@@ -36,12 +31,13 @@ PROMPT_WAV = "./asset/cross_lingual_prompt.wav"
 
 
 def run_trt_benchmark(model_dir='pretrained_models/CosyVoice2-0.5B', num_warmup=3,
-                      load_jit=True, load_trt=True, load_vllm=True):
+                      load_jit=True, load_trt=True):
     """
     Run TensorRT-accelerated benchmark suite.
+    Uses TensorRT for flow decoder, PyTorch for LLM.
     """
     print("=" * 70)
-    print("CosyVoice2 TensorRT-LLM Benchmark - Time to First Audio (TTFA)")
+    print("CosyVoice2 TensorRT Benchmark - Time to First Audio (TTFA)")
     print("=" * 70)
 
     # Configuration
@@ -49,24 +45,23 @@ def run_trt_benchmark(model_dir='pretrained_models/CosyVoice2-0.5B', num_warmup=
     print(f"  Model Dir:   {model_dir}")
     print(f"  Precision:   FP16")
     print(f"  JIT:         {'Enabled' if load_jit else 'Disabled'}")
-    print(f"  TensorRT:    {'Enabled' if load_trt else 'Disabled'}")
-    print(f"  vLLM:        {'Enabled' if load_vllm else 'Disabled'}")
+    print(f"  TensorRT:    {'Enabled' if load_trt else 'Disabled'} (flow decoder)")
 
-    # Load model with TensorRT
-    print(f"\nLoading model with TensorRT acceleration...")
+    # Load model with TensorRT (no vLLM due to version incompatibility)
+    print(f"\nLoading model...")
     load_start = time.perf_counter()
     model = CosyVoice2(
         model_dir=model_dir,
         load_jit=load_jit,
         load_trt=load_trt,
-        load_vllm=load_vllm,
+        load_vllm=False,  # Disabled due to vLLM 0.11+ incompatibility
         fp16=True
     )
     load_time = time.perf_counter() - load_start
     print(f"Model loaded in {load_time:.2f} seconds")
     print(f"Sample rate: {model.sample_rate} Hz")
 
-    # Warmup runs (more warmups for TRT to optimize)
+    # Warmup runs
     print(f"\nRunning {num_warmup} warmup iterations...")
     for i in range(num_warmup):
         set_all_random_seed(i)
@@ -121,7 +116,7 @@ def run_trt_benchmark(model_dir='pretrained_models/CosyVoice2-0.5B', num_warmup=
     total_values = [r['total_time_ms'] for r in ttfa_results]
 
     print("-" * 70)
-    print("\nResults Summary (TensorRT-LLM FP16):")
+    print("\nResults Summary (TensorRT FP16):")
     print("=" * 70)
     print(f"Time to First Audio (TTFA):")
     print(f"  Mean:   {statistics.mean(ttfa_values):7.1f} ms")
@@ -161,16 +156,23 @@ def compare_with_baseline(model_dir='pretrained_models/CosyVoice2-0.5B'):
     Run comparison between TensorRT and non-TensorRT inference.
     """
     print("\n" + "=" * 70)
-    print("COMPARISON: TensorRT vs Baseline")
+    print("COMPARISON: TensorRT vs Baseline (FP16)")
     print("=" * 70 + "\n")
 
     # Run baseline (FP16 without TRT)
     print(">>> Running Baseline (FP16, no TensorRT)...")
     print("-" * 70)
 
-    baseline_model = CosyVoice2(model_dir=model_dir, fp16=True)
+    baseline_model = CosyVoice2(model_dir=model_dir, load_trt=False, fp16=True)
+
+    # Warmup
+    for i in range(2):
+        set_all_random_seed(i)
+        for _ in baseline_model.inference_cross_lingual("Warmup.", PROMPT_WAV, stream=True):
+            pass
 
     baseline_ttfa = []
+    baseline_total = []
     for idx, phrase in enumerate(TEST_PHRASES[:5]):  # Only 5 for quick comparison
         set_all_random_seed(42 + idx)
         start_time = time.perf_counter()
@@ -179,31 +181,34 @@ def compare_with_baseline(model_dir='pretrained_models/CosyVoice2-0.5B'):
         for output in baseline_model.inference_cross_lingual(phrase, PROMPT_WAV, stream=True):
             if first_chunk_time is None:
                 first_chunk_time = (time.perf_counter() - start_time) * 1000
-                break
 
+        total_time = (time.perf_counter() - start_time) * 1000
         baseline_ttfa.append(first_chunk_time)
-        print(f"  Baseline Trial {idx+1}: TTFA = {first_chunk_time:.1f} ms")
+        baseline_total.append(total_time)
+        print(f"  Baseline Trial {idx+1}: TTFA = {first_chunk_time:7.1f} ms | Total = {total_time:7.1f} ms")
 
     del baseline_model
 
     # Run TensorRT
-    print("\n>>> Running TensorRT-LLM (FP16)...")
+    print("\n>>> Running TensorRT (FP16, TRT flow decoder)...")
     print("-" * 70)
 
     trt_model = CosyVoice2(
         model_dir=model_dir,
         load_jit=True,
         load_trt=True,
-        load_vllm=True,
+        load_vllm=False,
         fp16=True
     )
 
-    # Extra warmup for TRT
+    # Warmup
     for i in range(3):
-        for _ in trt_model.inference_cross_lingual("Warmup phrase.", PROMPT_WAV, stream=True):
+        set_all_random_seed(i)
+        for _ in trt_model.inference_cross_lingual("Warmup.", PROMPT_WAV, stream=True):
             pass
 
     trt_ttfa = []
+    trt_total = []
     for idx, phrase in enumerate(TEST_PHRASES[:5]):
         set_all_random_seed(42 + idx)
         start_time = time.perf_counter()
@@ -212,30 +217,42 @@ def compare_with_baseline(model_dir='pretrained_models/CosyVoice2-0.5B'):
         for output in trt_model.inference_cross_lingual(phrase, PROMPT_WAV, stream=True):
             if first_chunk_time is None:
                 first_chunk_time = (time.perf_counter() - start_time) * 1000
-                break
 
+        total_time = (time.perf_counter() - start_time) * 1000
         trt_ttfa.append(first_chunk_time)
-        print(f"  TensorRT Trial {idx+1}: TTFA = {first_chunk_time:.1f} ms")
+        trt_total.append(total_time)
+        print(f"  TensorRT Trial {idx+1}: TTFA = {first_chunk_time:7.1f} ms | Total = {total_time:7.1f} ms")
 
     # Summary
     print("\n" + "=" * 70)
     print("COMPARISON SUMMARY")
     print("=" * 70)
-    baseline_mean = statistics.mean(baseline_ttfa)
-    trt_mean = statistics.mean(trt_ttfa)
-    speedup = baseline_mean / trt_mean
+    baseline_ttfa_mean = statistics.mean(baseline_ttfa)
+    trt_ttfa_mean = statistics.mean(trt_ttfa)
+    baseline_total_mean = statistics.mean(baseline_total)
+    trt_total_mean = statistics.mean(trt_total)
 
-    print(f"  Baseline Mean TTFA:  {baseline_mean:7.1f} ms")
-    print(f"  TensorRT Mean TTFA:  {trt_mean:7.1f} ms")
-    print(f"  Speedup:             {speedup:7.2f}x")
-    print(f"  Latency Reduction:   {(1 - trt_mean/baseline_mean)*100:.1f}%")
+    ttfa_speedup = baseline_ttfa_mean / trt_ttfa_mean if trt_ttfa_mean > 0 else 0
+    total_speedup = baseline_total_mean / trt_total_mean if trt_total_mean > 0 else 0
+
+    print(f"\nTime to First Audio (TTFA):")
+    print(f"  Baseline Mean:   {baseline_ttfa_mean:7.1f} ms")
+    print(f"  TensorRT Mean:   {trt_ttfa_mean:7.1f} ms")
+    print(f"  Speedup:         {ttfa_speedup:7.2f}x")
+    print(f"  Latency Saved:   {baseline_ttfa_mean - trt_ttfa_mean:.1f} ms ({(1 - trt_ttfa_mean/baseline_ttfa_mean)*100:.1f}%)")
+
+    print(f"\nTotal Generation Time:")
+    print(f"  Baseline Mean:   {baseline_total_mean:7.1f} ms")
+    print(f"  TensorRT Mean:   {trt_total_mean:7.1f} ms")
+    print(f"  Speedup:         {total_speedup:7.2f}x")
+
     print("=" * 70)
 
 
 if __name__ == '__main__':
     import argparse
 
-    parser = argparse.ArgumentParser(description='CosyVoice2 TensorRT-LLM TTFA Benchmark')
+    parser = argparse.ArgumentParser(description='CosyVoice2 TensorRT TTFA Benchmark')
     parser.add_argument('--model_dir', type=str,
                         default='pretrained_models/CosyVoice2-0.5B',
                         help='Path to the model directory')
@@ -245,8 +262,6 @@ if __name__ == '__main__':
                         help='Disable JIT compilation')
     parser.add_argument('--no-trt', action='store_true',
                         help='Disable TensorRT for flow decoder')
-    parser.add_argument('--no-vllm', action='store_true',
-                        help='Disable vLLM for LLM inference')
     parser.add_argument('--compare', action='store_true',
                         help='Run comparison with baseline (no TRT)')
 
@@ -259,6 +274,5 @@ if __name__ == '__main__':
             model_dir=args.model_dir,
             num_warmup=args.warmup,
             load_jit=not args.no_jit,
-            load_trt=not args.no_trt,
-            load_vllm=not args.no_vllm
+            load_trt=not args.no_trt
         )
