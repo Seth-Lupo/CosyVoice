@@ -18,13 +18,13 @@ from tqdm import tqdm
 
 # Patch for Python 3.12+ compatibility with ruamel.yaml/hyperpyyaml
 try:
-    from ruamel.yaml import YAML
-    _original_init = YAML.__init__
-    def _patched_init(self, *args, **kwargs):
-        _original_init(self, *args, **kwargs)
-        if not hasattr(self, 'max_depth'):
-            self.max_depth = None
-    YAML.__init__ = _patched_init
+    import ruamel.yaml.composer
+    _original_compose_node = ruamel.yaml.composer.Composer.compose_node
+    def _patched_compose_node(self, parent, index):
+        if not hasattr(self.loader, 'max_depth'):
+            self.loader.max_depth = None
+        return _original_compose_node(self, parent, index)
+    ruamel.yaml.composer.Composer.compose_node = _patched_compose_node
 except Exception:
     pass
 
