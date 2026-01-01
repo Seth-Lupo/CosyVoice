@@ -15,6 +15,19 @@ import os
 import time
 from typing import Generator
 from tqdm import tqdm
+
+# Patch for Python 3.12+ compatibility with ruamel.yaml/hyperpyyaml
+import hyperpyyaml.core
+_original_loader = hyperpyyaml.core.make_yaml_loader
+
+def _patched_make_yaml_loader(*args, **kwargs):
+    loader = _original_loader(*args, **kwargs)
+    if not hasattr(loader, 'max_depth'):
+        loader.max_depth = None
+    return loader
+
+hyperpyyaml.core.make_yaml_loader = _patched_make_yaml_loader
+
 from hyperpyyaml import load_hyperpyyaml
 from modelscope import snapshot_download
 import torch
