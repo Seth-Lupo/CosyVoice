@@ -37,11 +37,39 @@ import triton_python_backend_utils as pb_utils
 from transformers import AutoTokenizer
 
 import torchaudio
-
-
-from matcha.utils.audio import mel_spectrogram
+from librosa.filters import mel as librosa_mel_fn
 
 ORIGINAL_VOCAB_SIZE = 151663
+
+# Mel spectrogram computation (replaces matcha.utils.audio dependency)
+_mel_basis_cache = {}
+_hann_window_cache = {}
+
+def mel_spectrogram(y, n_fft, num_mels, sampling_rate, hop_size, win_size, fmin, fmax, center=False):
+    """Compute mel spectrogram from waveform."""
+    global _mel_basis_cache, _hann_window_cache
+
+    cache_key = f"{fmax}_{y.device}"
+    if cache_key not in _mel_basis_cache:
+        mel = librosa_mel_fn(sr=sampling_rate, n_fft=n_fft, n_mels=num_mels, fmin=fmin, fmax=fmax)
+        _mel_basis_cache[cache_key] = torch.from_numpy(mel).float().to(y.device)
+        _hann_window_cache[str(y.device)] = torch.hann_window(win_size).to(y.device)
+
+    mel_basis = _mel_basis_cache[cache_key]
+    hann_window = _hann_window_cache[str(y.device)]
+
+    y = torch.nn.functional.pad(
+        y.unsqueeze(1), (int((n_fft - hop_size) / 2), int((n_fft - hop_size) / 2)), mode="reflect"
+    ).squeeze(1)
+
+    spec = torch.stft(
+        y, n_fft, hop_length=hop_size, win_length=win_size, window=hann_window,
+        center=center, pad_mode="reflect", normalized=False, onesided=True, return_complex=True
+    )
+    spec = torch.sqrt(torch.view_as_real(spec).pow(2).sum(-1) + 1e-9)
+    spec = torch.matmul(mel_basis, spec)
+    spec = torch.log(torch.clamp(spec, min=1e-5))
+    return spec
 torch.set_num_threads(1)
 
 
