@@ -34,13 +34,75 @@ from torch.utils.dlpack import to_dlpack
 from torch.nn import functional as F
 
 import triton_python_backend_utils as pb_utils
+import queue
 
 from hyperpyyaml import load_hyperpyyaml
-from cosyvoice.utils.common import fade_in_out
-from cosyvoice.utils.file_utils import convert_onnx_to_trt, export_cosyvoice2_vllm
-from cosyvoice.utils.common import TrtContextWrapper
 from collections import defaultdict
 import numpy as np
+
+# Inlined utilities (eliminates cosyvoice package dependency)
+
+def fade_in_out(fade_in_mel, fade_out_mel, window):
+    """Audio crossfade between two mel spectrograms."""
+    device = fade_in_mel.device
+    fade_in_mel, fade_out_mel = fade_in_mel.cpu(), fade_out_mel.cpu()
+    mel_overlap_len = int(window.shape[0] / 2)
+    if fade_in_mel.device == torch.device('cpu'):
+        fade_in_mel = fade_in_mel.clone()
+    fade_in_mel[..., :mel_overlap_len] = fade_in_mel[..., :mel_overlap_len] * window[:mel_overlap_len] + \
+        fade_out_mel[..., -mel_overlap_len:] * window[mel_overlap_len:]
+    return fade_in_mel.to(device)
+
+
+class TrtContextWrapper:
+    """TensorRT execution context pool for concurrent inference."""
+    def __init__(self, trt_engine, trt_concurrent=1, device='cuda:0'):
+        self.trt_context_pool = queue.Queue(maxsize=trt_concurrent)
+        self.trt_engine = trt_engine
+        for _ in range(trt_concurrent):
+            trt_context = trt_engine.create_execution_context()
+            trt_stream = torch.cuda.stream(torch.cuda.Stream(device))
+            assert trt_context is not None, f'failed to create trt context, try reduce trt_concurrent {trt_concurrent}'
+            self.trt_context_pool.put([trt_context, trt_stream])
+
+    def acquire_estimator(self):
+        return self.trt_context_pool.get(), self.trt_engine
+
+    def release_estimator(self, context, stream):
+        self.trt_context_pool.put([context, stream])
+
+
+def convert_onnx_to_trt(trt_model, trt_kwargs, onnx_model, fp16):
+    """Convert ONNX model to TensorRT engine."""
+    import tensorrt as trt
+    logging.info("Converting onnx to trt...")
+    network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    trt_logger = trt.Logger(trt.Logger.INFO)
+    builder = trt.Builder(trt_logger)
+    network = builder.create_network(network_flags)
+    parser = trt.OnnxParser(network, trt_logger)
+    config = builder.create_builder_config()
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 32)
+    if fp16:
+        config.set_flag(trt.BuilderFlag.FP16)
+    profile = builder.create_optimization_profile()
+    with open(onnx_model, "rb") as f:
+        if not parser.parse(f.read()):
+            for error in range(parser.num_errors):
+                print(parser.get_error(error))
+            raise ValueError(f'failed to parse {onnx_model}')
+    for i in range(len(trt_kwargs['input_names'])):
+        profile.set_shape(trt_kwargs['input_names'][i], trt_kwargs['min_shape'][i], trt_kwargs['opt_shape'][i], trt_kwargs['max_shape'][i])
+    tensor_dtype = trt.DataType.HALF if fp16 else trt.DataType.FLOAT
+    for i in range(network.num_inputs):
+        network.get_input(i).dtype = tensor_dtype
+    for i in range(network.num_outputs):
+        network.get_output(i).dtype = tensor_dtype
+    config.add_optimization_profile(profile)
+    engine_bytes = builder.build_serialized_network(network, config)
+    with open(trt_model, "wb") as f:
+        f.write(engine_bytes)
+    logging.info("Successfully converted onnx to trt")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

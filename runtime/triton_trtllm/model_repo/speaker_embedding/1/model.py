@@ -30,11 +30,63 @@ from torch.utils.dlpack import to_dlpack
 import triton_python_backend_utils as pb_utils
 
 import os
+import queue
+import logging
 import numpy as np
 import torchaudio.compliance.kaldi as kaldi
-from cosyvoice.utils.file_utils import convert_onnx_to_trt
-from cosyvoice.utils.common import TrtContextWrapper
 import onnxruntime
+
+# Inlined utilities (eliminates cosyvoice package dependency)
+
+class TrtContextWrapper:
+    """TensorRT execution context pool for concurrent inference."""
+    def __init__(self, trt_engine, trt_concurrent=1, device='cuda:0'):
+        self.trt_context_pool = queue.Queue(maxsize=trt_concurrent)
+        self.trt_engine = trt_engine
+        for _ in range(trt_concurrent):
+            trt_context = trt_engine.create_execution_context()
+            trt_stream = torch.cuda.stream(torch.cuda.Stream(device))
+            assert trt_context is not None, f'failed to create trt context, try reduce trt_concurrent {trt_concurrent}'
+            self.trt_context_pool.put([trt_context, trt_stream])
+
+    def acquire_estimator(self):
+        return self.trt_context_pool.get(), self.trt_engine
+
+    def release_estimator(self, context, stream):
+        self.trt_context_pool.put([context, stream])
+
+
+def convert_onnx_to_trt(trt_model, trt_kwargs, onnx_model, fp16):
+    """Convert ONNX model to TensorRT engine."""
+    import tensorrt as trt
+    logging.info("Converting onnx to trt...")
+    network_flags = 1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
+    trt_logger = trt.Logger(trt.Logger.INFO)
+    builder = trt.Builder(trt_logger)
+    network = builder.create_network(network_flags)
+    parser = trt.OnnxParser(network, trt_logger)
+    config = builder.create_builder_config()
+    config.set_memory_pool_limit(trt.MemoryPoolType.WORKSPACE, 1 << 32)
+    if fp16:
+        config.set_flag(trt.BuilderFlag.FP16)
+    profile = builder.create_optimization_profile()
+    with open(onnx_model, "rb") as f:
+        if not parser.parse(f.read()):
+            for error in range(parser.num_errors):
+                print(parser.get_error(error))
+            raise ValueError(f'failed to parse {onnx_model}')
+    for i in range(len(trt_kwargs['input_names'])):
+        profile.set_shape(trt_kwargs['input_names'][i], trt_kwargs['min_shape'][i], trt_kwargs['opt_shape'][i], trt_kwargs['max_shape'][i])
+    tensor_dtype = trt.DataType.HALF if fp16 else trt.DataType.FLOAT
+    for i in range(network.num_inputs):
+        network.get_input(i).dtype = tensor_dtype
+    for i in range(network.num_outputs):
+        network.get_output(i).dtype = tensor_dtype
+    config.add_optimization_profile(profile)
+    engine_bytes = builder.build_serialized_network(network, config)
+    with open(trt_model, "wb") as f:
+        f.write(engine_bytes)
+    logging.info("Successfully converted onnx to trt")
 
 
 class TritonPythonModel:
