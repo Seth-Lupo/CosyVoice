@@ -122,7 +122,12 @@ class CosyVoice2:
         if not os.path.exists(hyper_yaml_path):
             raise ValueError('{} not found!'.format(hyper_yaml_path))
         with open(hyper_yaml_path, 'r') as f:
-            configs = load_hyperpyyaml(f, overrides={'qwen_pretrain_path': os.path.join(model_dir, 'CosyVoice-BlankEN')})
+            yaml_content = f.read()
+        # Patch matcha imports to use inlined cosyvoice.matcha module
+        yaml_content = yaml_content.replace('!name:matcha.', '!name:cosyvoice.matcha.')
+        yaml_content = yaml_content.replace('!new:matcha.', '!new:cosyvoice.matcha.')
+        from io import StringIO
+        configs = load_hyperpyyaml(StringIO(yaml_content), overrides={'qwen_pretrain_path': os.path.join(model_dir, 'CosyVoice-BlankEN')})
         self.model = CosyVoice2Model(configs['flow'], configs['hift'], fp16, device)
         self.model.load('{}/flow.pt'.format(model_dir), '{}/hift.pt'.format(model_dir))
         if load_jit:
