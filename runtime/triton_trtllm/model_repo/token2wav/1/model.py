@@ -128,28 +128,30 @@ class CosyVoice2:
         yaml_content = yaml_content.replace('!new:matcha.', '!new:cosyvoice.matcha.')
         # Extract only the sections we need (flow, hift, and their dependencies)
         # This avoids importing cosyvoice.llm and other modules not available in inference
-        import re
+        # Use whitelist approach: only include specific sections we need
         lines = yaml_content.split('\n')
         filtered_lines = []
-        in_needed_section = False
-        needed_sections = {'sample_rate:', 'llm_input_size:', 'llm_output_size:', 'spk_embed_dim:',
-                          'token_frame_rate:', 'token_mel_ratio:', 'chunk_size:', 'num_decoding_left_chunks:',
-                          'flow:', 'hift:'}
-        skip_sections = {'llm:', 'hifigan:', 'mel_spec_transform', 'parquet_opener:', 'get_tokenizer:',
-                        'allowed_special:', 'tokenize:', 'filter:', 'resample:', 'truncate:',
-                        'feat_extractor:', 'compute_fbank:', 'compute_f0:', 'parse_embedding:',
-                        'shuffle:', 'sort:', 'batch:', 'padding:', 'data_pipeline:', 'train_conf:'}
-        current_indent = 0
-        skip_until_next_section = False
+        # Sections to include (whitelist)
+        include_prefixes = (
+            'sample_rate:', 'llm_input_size:', 'llm_output_size:', 'spk_embed_dim:',
+            'qwen_pretrain_path:', 'token_frame_rate:', 'token_mel_ratio:',
+            'chunk_size:', 'num_decoding_left_chunks:',
+            'flow:', 'hift:',
+            '__set_seed',  # Include random seed setup
+        )
+        in_included_section = False
         for line in lines:
             stripped = line.lstrip()
             indent = len(line) - len(stripped)
-            # Check if this is a top-level key
-            if stripped and not stripped.startswith('#') and indent == 0:
-                skip_until_next_section = any(stripped.startswith(s) for s in skip_sections)
-                if not skip_until_next_section:
-                    filtered_lines.append(line)
-            elif not skip_until_next_section:
+            # At indent 0, check if this is a section we want
+            if indent == 0 and stripped and not stripped.startswith('#'):
+                # Extract the key (everything before the colon or space)
+                in_included_section = stripped.startswith(include_prefixes)
+            # Include the line if we're in an included section, or if it's empty/comment at top level
+            if in_included_section:
+                filtered_lines.append(line)
+            elif indent == 0 and (not stripped or stripped.startswith('#')):
+                # Include top-level comments and empty lines
                 filtered_lines.append(line)
         yaml_content = '\n'.join(filtered_lines)
         from io import StringIO
