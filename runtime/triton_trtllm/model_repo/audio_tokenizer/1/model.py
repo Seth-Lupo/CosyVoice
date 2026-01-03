@@ -32,15 +32,42 @@ import triton_python_backend_utils as pb_utils
 import os
 import numpy as np
 import s3tokenizer
+import onnxruntime as ort
 torch.set_num_threads(1)
 ORIGINAL_VOCAB_SIZE = 151663
+
+
+class OnnxS3Tokenizer:
+    """ONNX Runtime wrapper for S3Tokenizer model."""
+
+    def __init__(self, onnx_path, device="cuda"):
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        sess_options = ort.SessionOptions()
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+        self.session = ort.InferenceSession(onnx_path, sess_options=sess_options, providers=providers)
+        self.input_name = self.session.get_inputs()[0].name
+        self.output_name = self.session.get_outputs()[0].name
+        self.device = device
+
+    def quantize(self, mels, mels_lens):
+        """Quantize mel spectrograms to speech codes."""
+        # Run ONNX inference
+        mels_np = mels.cpu().numpy() if isinstance(mels, torch.Tensor) else mels
+        codes = self.session.run([self.output_name], {self.input_name: mels_np})[0]
+        codes = torch.from_numpy(codes)
+
+        # Compute output lengths (codes have same time dimension as mels)
+        codes_lens = mels_lens.clone() if isinstance(mels_lens, torch.Tensor) else torch.tensor(mels_lens)
+
+        return codes, codes_lens
 
 
 class TritonPythonModel:
     """Triton Python model for audio tokenization.
 
     This model takes reference audio input and extracts semantic tokens
-    using s3tokenizer.
+    using s3tokenizer with ONNX Runtime backend.
     """
 
     def initialize(self, args):
@@ -55,7 +82,9 @@ class TritonPythonModel:
 
         self.device = torch.device("cuda")
         model_path = os.path.join(model_params["model_dir"], "speech_tokenizer_v2.onnx")
-        self.audio_tokenizer = s3tokenizer.load_model(model_path).to(self.device)
+
+        # Use ONNX Runtime for the tokenizer model
+        self.audio_tokenizer = OnnxS3Tokenizer(model_path, device=self.device)
 
     def execute(self, requests):
         """Execute inference on the batched requests.
