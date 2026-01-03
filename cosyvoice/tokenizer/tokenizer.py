@@ -4,7 +4,6 @@ from functools import lru_cache
 from typing import Optional
 import torch
 from transformers import AutoTokenizer
-from whisper.tokenizer import Tokenizer
 
 import tiktoken
 
@@ -213,7 +212,9 @@ def get_tokenizer(
     num_languages: int = 99,
     language: Optional[str] = None,
     task: Optional[str] = None,  # Literal["transcribe", "translate", None]
-) -> Tokenizer:
+):
+    # Lazy import to avoid requiring whisper for inference
+    from whisper.tokenizer import Tokenizer
     if language is not None:
         language = language.lower()
         if language not in LANGUAGES:
