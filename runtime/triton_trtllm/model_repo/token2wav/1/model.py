@@ -126,15 +126,32 @@ class CosyVoice2:
         # Patch matcha imports to use inlined cosyvoice.matcha module
         yaml_content = yaml_content.replace('!name:matcha.', '!name:cosyvoice.matcha.')
         yaml_content = yaml_content.replace('!new:matcha.', '!new:cosyvoice.matcha.')
-        # Remove sections that have dependencies we don't need for inference
-        # Only keep: flow, hift, and basic params
+        # Extract only the sections we need (flow, hift, and their dependencies)
+        # This avoids importing cosyvoice.llm and other modules not available in inference
         import re
-        # Comment out llm section (we don't need it for token2wav)
-        yaml_content = re.sub(r'^llm:.*?(?=^\w+:|\Z)', '', yaml_content, flags=re.MULTILINE | re.DOTALL)
-        # Comment out hifigan section (training only)
-        yaml_content = re.sub(r'^hifigan:.*?(?=^\w+:|\Z)', '', yaml_content, flags=re.MULTILINE | re.DOTALL)
-        # Comment out data pipeline sections (training only)
-        yaml_content = re.sub(r'^(parquet_opener|get_tokenizer|tokenize|filter|resample|truncate|feat_extractor|compute_fbank|compute_f0|parse_embedding|shuffle|sort|batch|padding|data_pipeline|train_conf):.*?(?=^\w+:|\Z)', '', yaml_content, flags=re.MULTILINE | re.DOTALL)
+        lines = yaml_content.split('\n')
+        filtered_lines = []
+        in_needed_section = False
+        needed_sections = {'sample_rate:', 'llm_input_size:', 'llm_output_size:', 'spk_embed_dim:',
+                          'token_frame_rate:', 'token_mel_ratio:', 'chunk_size:', 'num_decoding_left_chunks:',
+                          'flow:', 'hift:'}
+        skip_sections = {'llm:', 'hifigan:', 'mel_spec_transform', 'parquet_opener:', 'get_tokenizer:',
+                        'allowed_special:', 'tokenize:', 'filter:', 'resample:', 'truncate:',
+                        'feat_extractor:', 'compute_fbank:', 'compute_f0:', 'parse_embedding:',
+                        'shuffle:', 'sort:', 'batch:', 'padding:', 'data_pipeline:', 'train_conf:'}
+        current_indent = 0
+        skip_until_next_section = False
+        for line in lines:
+            stripped = line.lstrip()
+            indent = len(line) - len(stripped)
+            # Check if this is a top-level key
+            if stripped and not stripped.startswith('#') and indent == 0:
+                skip_until_next_section = any(stripped.startswith(s) for s in skip_sections)
+                if not skip_until_next_section:
+                    filtered_lines.append(line)
+            elif not skip_until_next_section:
+                filtered_lines.append(line)
+        yaml_content = '\n'.join(filtered_lines)
         from io import StringIO
         configs = load_hyperpyyaml(StringIO(yaml_content), overrides={'qwen_pretrain_path': os.path.join(model_dir, 'CosyVoice-BlankEN')})
         self.model = CosyVoice2Model(configs['flow'], configs['hift'], fp16, device)
