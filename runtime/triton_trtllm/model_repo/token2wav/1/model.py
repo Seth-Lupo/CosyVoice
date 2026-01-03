@@ -126,6 +126,15 @@ class CosyVoice2:
         # Patch matcha imports to use inlined cosyvoice.matcha module
         yaml_content = yaml_content.replace('!name:matcha.', '!name:cosyvoice.matcha.')
         yaml_content = yaml_content.replace('!new:matcha.', '!new:cosyvoice.matcha.')
+        # Remove sections that have dependencies we don't need for inference
+        # Only keep: flow, hift, and basic params
+        import re
+        # Comment out llm section (we don't need it for token2wav)
+        yaml_content = re.sub(r'^llm:.*?(?=^\w+:|\Z)', '', yaml_content, flags=re.MULTILINE | re.DOTALL)
+        # Comment out hifigan section (training only)
+        yaml_content = re.sub(r'^hifigan:.*?(?=^\w+:|\Z)', '', yaml_content, flags=re.MULTILINE | re.DOTALL)
+        # Comment out data pipeline sections (training only)
+        yaml_content = re.sub(r'^(parquet_opener|get_tokenizer|tokenize|filter|resample|truncate|feat_extractor|compute_fbank|compute_f0|parse_embedding|shuffle|sort|batch|padding|data_pipeline|train_conf):.*?(?=^\w+:|\Z)', '', yaml_content, flags=re.MULTILINE | re.DOTALL)
         from io import StringIO
         configs = load_hyperpyyaml(StringIO(yaml_content), overrides={'qwen_pretrain_path': os.path.join(model_dir, 'CosyVoice-BlankEN')})
         self.model = CosyVoice2Model(configs['flow'], configs['hift'], fp16, device)
