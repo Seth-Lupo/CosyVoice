@@ -18,8 +18,8 @@ import torch.nn.functional as F
 from einops import pack, rearrange, repeat
 from cosyvoice.utils.common import mask_to_bias
 from cosyvoice.utils.mask import add_optional_chunk_mask
-from matcha.models.components.decoder import SinusoidalPosEmb, Block1D, ResnetBlock1D, Downsample1D, TimestepEmbedding, Upsample1D
-from matcha.models.components.transformer import BasicTransformerBlock
+from cosyvoice.matcha.models.components.decoder import SinusoidalPosEmb, Block1D, ResnetBlock1D, Downsample1D, TimestepEmbedding, Upsample1D
+from cosyvoice.matcha.models.components.transformer import BasicTransformerBlock
 
 
 class Transpose(torch.nn.Module):
